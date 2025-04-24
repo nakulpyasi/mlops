@@ -11,6 +11,7 @@ from mlflow.sklearn import autolog
 
 # define functions
 def main(args):
+
     # enable autologging
     autolog()
 
