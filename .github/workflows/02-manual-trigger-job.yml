@@ -128,7 +128,7 @@ jobs:
           az ml online-endpoint create \
               --workspace-name ${{ env.workspace-name }} \
               --resource-group ${{ env.resource-group }} \
-              --file src/deploy/endpoint.yml
+              --file src/deploy/endpoint.yaml
       - name: Deploy Model to Endpoint
         run: |
           az ml online-deployment create --name blue \
