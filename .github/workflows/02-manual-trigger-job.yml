@@ -1,4 +1,4 @@
-name: Train, Register, and Deploy ML Model
+name: Full ML CI/CD Pipeline
 
 on:
   push:
@@ -27,12 +27,10 @@ jobs:
           python-version: '3.8'
 
       - name: Install flake8
-        run: |
-          pip install flake8
+        run: pip install flake8
 
       - name: Run flake8
-        run: |
-          flake8 src/model/
+        run: flake8 src/model/
 
   unit-test:
     name: Run Unit Tests
@@ -54,8 +52,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run tests
-        run: |
-          pytest tests/test_train.py
+        run: pytest tests/test_train.py
 
   experiment:
     name: Train Model (Development)
@@ -69,18 +66,18 @@ jobs:
       - name: Install Azure ML CLI
         run: az extension add -n ml -y
 
-      - name: Azure CLI Login
+      - name: Azure Login
         uses: azure/login@v1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Submit Azure ML Job (Dev Data)
+      - name: Submit Azure ML Job (Development Dataset)
         run: |
           az ml job create --file ./src/job.yml \
-            --workspace-name ${{ env.workspace-name }} \
-            --resource-group ${{ env.resource-group }}
+          --workspace-name ${{ env.workspace-name }} \
+          --resource-group ${{ env.resource-group }}
 
   production:
     name: Train Model (Production)
@@ -94,23 +91,22 @@ jobs:
       - name: Install Azure ML CLI
         run: az extension add -n ml -y
 
-      - name: Azure CLI Login
+      - name: Azure Login
         uses: azure/login@v1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Submit Azure ML Job (Production Data)
+      - name: Submit Azure ML Job (Production Dataset Override)
         run: |
           az ml job create --file ./src/job.yml \
-            --set inputs.training_data.path=azureml:diabetes-prod-folder:1 \
-            --workspace-name ${{ env.workspace-name }} \
-            --resource-group ${{ env.resource-group }}
+          --set inputs.training_data.path=azureml:diabetes-prod-folder:1 \
+          --workspace-name ${{ env.workspace-name }} \
+          --resource-group ${{ env.resource-group }}
 
-  register:
-    name: Register Latest Model
-    environment: production
+  deploy:
+    name: Deploy Registered Model
     runs-on: ubuntu-latest
     needs: production
     steps:
@@ -120,56 +116,26 @@ jobs:
       - name: Install Azure ML CLI
         run: az extension add -n ml -y
 
-      - name: Azure CLI Login
+      - name: Azure Login
         uses: azure/login@v1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Register Model from Latest Job
+      - name: Create Online Endpoint
         run: |
-          LAST_RUN_ID=$(az ml job list --workspace-name ${{ env.workspace-name }} --resource-group ${{ env.resource-group }} --query "sort_by([].{name:name, created:creation_context.created_at}, &created) | reverse(@) | [0].name" -o tsv)
-          echo "Last Run ID: $LAST_RUN_ID"
-          az ml model create \
-            --name diabetes-classification-model \
-            --path azureml://jobs/$LAST_RUN_ID/outputs/model/ \
-            --workspace-name ${{ env.workspace-name }} \
-            --resource-group ${{ env.resource-group }}
-
-  deploy:
-    name: Deploy Latest Model to Endpoint
-    environment: production
-    runs-on: ubuntu-latest
-    needs: register
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Install Azure ML CLI
-        run: az extension add -n ml -y
-
-      - name: Azure CLI Login
-        uses: azure/login@v1
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Get Latest Model Version
-        id: get_model
-        run: |
-          MODEL_VERSION=$(az ml model list --name diabetes-classification-model --workspace-name ${{ env.workspace-name }} --resource-group ${{ env.resource-group }} --query "[0].version" -o tsv)
-          echo "MODEL_VERSION=$MODEL_VERSION" >> $GITHUB_ENV
+          az ml online-endpoint create --name diabetes-endpoint-cicd \
+          --workspace-name ${{ env.workspace-name }} \
+          --resource-group ${{ env.resource-group }} \
+          --file src/deploy/endpoint.yml
 
       - name: Deploy Model to Endpoint
         run: |
-          az ml online-deployment update \
-            --name diabetes-deployment \
-            --endpoint-name diabetes-endpoint \
-            --model azureml:diabetes-classification-model:${{ env.MODEL_VERSION }} \
-            --instance-type Standard_DS3_v2 \
-            --instance-count 1 \
-            --workspace-name ${{ env.workspace-name }} \
-            --resource-group ${{ env.resource-group }} \
-            --all-traffic
+          az ml online-deployment create --name blue \
+          --endpoint-name diabetes-endpoint-cicd \
+          --model diabetes-classification-model:1 \
+          --instance-type Standard_DS2_v2 \
+          --instance-count 1 \
+          --workspace-name ${{ env.workspace-name }} \
+          --resource-group ${{ env.resource-group }}
