@@ -125,11 +125,10 @@ jobs:
 
       - name: Create Online Endpoint
         run: |
-          az ml online-endpoint create --name diabetes-endpoint-cicd \
-          --workspace-name ${{ env.workspace-name }} \
-          --resource-group ${{ env.resource-group }} \
-          --file src/deploy/endpoint.yml
-
+          az ml online-endpoint create \
+              --workspace-name ${{ env.workspace-name }} \
+              --resource-group ${{ env.resource-group }} \
+              --file src/deploy/endpoint.yml
       - name: Deploy Model to Endpoint
         run: |
           az ml online-deployment create --name blue \
